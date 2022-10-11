@@ -1,3 +1,10 @@
+rsync (3.2.3-8ubuntu3.1) jammy; urgency=medium
+
+  * d/p/avoid_spurious_is_newer_messages_with_update.patch: New patch from
+    upstream (LP: #1965076)
+
+ -- Simon Deziel <simon@sdeziel.info>  Tue, 11 Oct 2022 22:37:36 +0000
+
 rsync (3.2.3-8ubuntu3) jammy; urgency=high
 
   * No change rebuild for ppc64el baseline bump.

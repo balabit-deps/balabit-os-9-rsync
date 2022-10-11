@@ -11,3 +11,4 @@ fix_mkpath.patch
 fix_sparse_inplace.patch
 update_rrsync_options.patch
 fix_rsync-ssl_RSYNC_SSL_CERT_feature.patch
+avoid_spurious_is_newer_messages_with_update.patch

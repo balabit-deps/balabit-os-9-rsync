@@ -1,0 +1,59 @@
+Description: Avoid spurious "is newer" messages with --update.
+Bug: https://github.com/WayneD/rsync/issues/98
+Origin: https://github.com/WayneD/rsync/commit/fd6839b7464f53afb4cf016e4b4f6d2c477eb8d8
+Bug-Ubuntu: https://bugs.launchpad.net/ubuntu/+source/rsync/+bug/1965076
+Forwarded: not-needed
+
+diff --git a/generator.c b/generator.c
+index eb55a99..6850882 100644
+--- a/generator.c
++++ b/generator.c
+@@ -1704,7 +1704,7 @@ static void recv_generator(char *fname, struct file_struct *file, int ndx,
+ 		goto cleanup;
+ 	}
+ 
+-	if (update_only > 0 && statret == 0 && file->modtime - sx.st.st_mtime <= modify_window) {
++	if (update_only > 0 && statret == 0 && file->modtime - sx.st.st_mtime < modify_window) {
+ 		if (INFO_GTE(SKIP, 1))
+ 			rprintf(FINFO, "%s is newer\n", fname);
+ #ifdef SUPPORT_HARD_LINKS
+diff --git a/testsuite/exclude.test b/testsuite/exclude.test
+index fad4fd7..f9d1a99 100644
+--- a/testsuite/exclude.test
++++ b/testsuite/exclude.test
+@@ -118,7 +118,8 @@ ln -s too "$fromdir/bar/down/to/foo/sym"
+ 
+ # Start to prep an --update test dir
+ mkdir "$scratchdir/up1" "$scratchdir/up2"
+-touch "$scratchdir/up1/older" "$scratchdir/up2/newer"
++touch "$scratchdir/up1/dst-newness" "$scratchdir/up2/src-newness"
++touch "$scratchdir/up1/same-newness" "$scratchdir/up2/same-newness"
+ touch "$scratchdir/up1/extra-src" "$scratchdir/up2/extra-dest"
+ 
+ # Create chkdir with what we expect to be excluded.
+@@ -133,7 +134,7 @@ rm "$chkdir"/bar/down/to/foo/to "$chkdir"/bar/down/to/foo/file[235-9]
+ rm "$chkdir"/mid/for/foo/extra
+ 
+ # Finish prep for the --update test (run last)
+-touch "$scratchdir/up1/newer" "$scratchdir/up2/older"
++touch "$scratchdir/up1/src-newness" "$scratchdir/up2/dst-newness"
+ 
+ # Un-tweak the directory times in our first (weak) exclude test (though
+ # it's a good test of the --existing option).
+@@ -227,11 +228,14 @@ checkit "$RSYNC -avv $relative_opts --exclude='$fromdir/foo/down' \
+     '$fromdir/foo' '$todir'" "$chkdir$fromdir/foo" "$todir$fromdir/foo"
+ 
+ # Now we'll test the --update option.
+-$RSYNC -aiO --update touch "$scratchdir/up1/" "$scratchdir/up2/" \
++$RSYNC -aiiO --update --info=skip "$scratchdir/up1/" "$scratchdir/up2/" \
+     | tee "$outfile"
+ cat <<EOT >"$chkfile"
++dst-newness is newer
++.d          ./
+ >f$all_plus extra-src
+->f..t.$dots newer
++.f$allspace same-newness
++>f..t.$dots src-newness
+ EOT
+ diff $diffopt "$chkfile" "$outfile" || test_fail "--update test failed"
+ 
