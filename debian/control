@@ -11,7 +11,9 @@ Build-Depends: debhelper-compat (= 13),
                libxxhash-dev,
                libzstd-dev,
                zlib1g-dev,
-               libssl-dev
+               libssl-dev,
+               python3,
+               python3-commonmark
 Standards-Version: 4.6.0
 Rules-Requires-Root: no
 Homepage: https://rsync.samba.org/
@@ -27,7 +29,8 @@ Depends: lsb-base,
          ${shlibs:Depends}
 Suggests: openssh-client,
           openssh-server,
-          python3
+          python3,
+          python3-braceexpand
 Description: fast, versatile, remote (and local) file-copying tool
  rsync is a fast and versatile file-copying tool which can copy locally
  and to/from a remote host. It offers many options to control its behavior,
