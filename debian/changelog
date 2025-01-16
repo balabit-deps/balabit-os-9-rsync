@@ -1,3 +1,49 @@
+rsync (3.2.7-0ubuntu0.22.04.4) jammy-security; urgency=medium
+
+  * SECURITY REGRESSION: flag collision (LP: #2095004)
+    - d/p/fix_flag_got_dir_flist_collision.patch: change the flag bit to 13 
+
+ -- Sudhakar Verma <sudhakar.verma@canonical.com>  Thu, 16 Jan 2025 15:25:20 +0530
+
+rsync (3.2.7-0ubuntu0.22.04.3) jammy-security; urgency=medium
+
+  * SECURITY UPDATE: safe links bypass vulnerability
+    - d/p/CVE-2024-12088/0001-make-safe-links-stricter.patch: reject
+      links where a "../" component is included in the destination
+    - CVE-2024-12088
+  * SECURITY UPDATE: arbitrary file write via symbolic links
+    - d/p/CVE-2024-12087/0001-Refuse-a-duplicate-dirlist.patch: refuse
+      malicious duplicate flist for dir
+    - d/p/CVE-2024-12087/0002-range-check-dir_ndx-before-use.patch: refuse
+      invalid dir_ndx
+    - CVE-2024-12087
+  * SECURITY UPDATE: arbitrary client file leak
+    - d/p/CVE-2024-12086/0001-refuse-fuzzy-options-when-fuzzy-not-selected.patch:
+      refuse fuzzy options when not selected
+    - d/p/CVE-2024-12086/0002-added-secure_relative_open.patch: safe
+      implementation to open a file relative to a base directory
+    - d/p/CVE-2024-12086/0003-receiver-use-secure_relative_open-for-basis-file.patch:
+      ensure secure file access for basis file
+    - d/p/CVE-2024-12086/0004-disallow-.-elements-in-relpath-for-secure_relative_o.patch:
+      disallow "../" in relative path
+    - CVE-2024-12086
+  * SECURITY UPDATE: information leak via uninitialized stack contents
+    - d/p/CVE-2024-12085/0001-prevent-information-leak-off-the-stack.patch:
+      prevent information leak by zeroing
+    - CVE-2024-12085
+  * SECURITY UPDATE: heap buffer overflow in checksum parsing
+    - d/p/CVE-2024-12084/0001-Some-checksum-buffer-fixes.patch: fix
+      checksum buffer issues, better length check
+    - d/p/CVE-2024-12084/0002-Another-cast-when-multiplying-integers.patch:
+      fix multiplying size by a better cast
+    - CVE-2024-12084
+  * SECURITY UPDATE: symlink race condition
+    - d/p/CVE-2024-12747/0001-fixed-symlink-race-condition-in-sender.patch:
+      do_open_checklinks to prevent symlink race
+    - CVE-2024-12747 
+
+ -- Sudhakar Verma <sudhakar.verma@canonical.com>  Mon, 13 Jan 2025 16:36:53 +0530
+
 rsync (3.2.7-0ubuntu0.22.04.2) jammy-security; urgency=medium
 
   * SECURITY UPDATE: arbitrary file write via malicious remote servers
