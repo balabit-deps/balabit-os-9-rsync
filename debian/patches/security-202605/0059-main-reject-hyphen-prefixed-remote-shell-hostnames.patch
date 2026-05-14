@@ -1,0 +1,27 @@
+From d094c4723a93ccdbebc891945b459ccd2711fc86 Mon Sep 17 00:00:00 2001
+From: Andrew Tridgell <andrew@tridgell.net>
+Date: Fri, 15 May 2026 10:17:03 +1000
+Subject: [PATCH 59/60] main: reject hyphen-prefixed remote-shell hostnames
+
+---
+ main.c | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/main.c b/main.c
+index f26f256f..86f44ac5 100644
+--- a/main.c
++++ b/main.c
+@@ -1577,6 +1577,10 @@ static int start_client(int argc, char *argv[])
+ 			shell_user = shell_machine;
+ 			shell_machine = p+1;
+ 		}
++		if (*shell_machine == '-') {
++			rprintf(FERROR, "Invalid remote host: hostnames may not start with '-'.\n");
++			exit_cleanup(RERR_SYNTAX);
++		}
+ 	}
+ 
+ 	if (DEBUG_GTE(CMD, 2)) {
+-- 
+2.51.0
+

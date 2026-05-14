@@ -1,0 +1,87 @@
+Backport of:
+
+From 4370cb2ce10a9277c797e1d48c359b37c6dd5045 Mon Sep 17 00:00:00 2001
+From: Andrew Tridgell <andrew@tridgell.net>
+Date: Thu, 7 May 2026 09:17:09 +1000
+Subject: [PATCH 56/60] testsuite: fixes for 3.2.7 backport
+
+---
+ .github/workflows/cygwin-build.yml   |  2 +-
+ .github/workflows/macos-build.yml    |  2 +-
+ testsuite/clean-fname-underflow.test | 17 +++++++++++++++--
+ usage.c                              |  1 +
+ 4 files changed, 18 insertions(+), 4 deletions(-)
+
+#diff --git a/.github/workflows/cygwin-build.yml b/.github/workflows/cygwin-build.yml
+#index b023c535..6b6284c5 100644
+#--- a/.github/workflows/cygwin-build.yml
+#+++ b/.github/workflows/cygwin-build.yml
+#@@ -38,7 +38,7 @@ jobs:
+#     - name: info
+#       run: bash -c '/usr/local/bin/rsync --version'
+#     - name: check
+#-      run: bash -c 'RSYNC_EXPECT_SKIPPED=acls-default,acls,atimes,bare-do-open-symlink-race,chdir-symlink-race,chmod-symlink-race,chown-fake,chown,crtimes,daemon-chroot-acl,devices-fake,devices,dir-sgid,protected-regular,sender-flist-symlink-leak,simd-checksum,symlink-dirlink-basis,xattrs-hlink,xattrs make check'
+#+      run: bash -c 'RSYNC_EXPECT_SKIPPED=acls-default,acls,bare-do-open-symlink-race,chdir-symlink-race,chmod-symlink-race,chown,clean-fname-underflow,daemon-chroot-acl,devices,dir-sgid,protected-regular,sender-flist-symlink-leak,simd-checksum,symlink-dirlink-basis make check'
+#     - name: ssl file list
+#       run: bash -c 'PATH="/usr/local/bin:$PATH" rsync-ssl --no-motd download.samba.org::rsyncftp/ || true'
+#     - name: save artifact
+#diff --git a/.github/workflows/macos-build.yml b/.github/workflows/macos-build.yml
+#index 0bc46e4a..f87f222f 100644
+#--- a/.github/workflows/macos-build.yml
+#+++ b/.github/workflows/macos-build.yml
+#@@ -40,7 +40,7 @@ jobs:
+#     - name: info
+#       run: rsync --version
+#     - name: check
+#-      run: sudo RSYNC_EXPECT_SKIPPED=acls-default,chmod-temp-dir,chown-fake,daemon-chroot-acl,devices-fake,dir-sgid,protected-regular,simd-checksum,xattrs-hlink,xattrs make check
+#+      run: sudo RSYNC_EXPECT_SKIPPED=acls-default,chmod-temp-dir,chown-fake,clean-fname-underflow,daemon-chroot-acl,devices-fake,dir-sgid,protected-regular,simd-checksum,xattrs-hlink,xattrs make check
+#     - name: ssl file list
+#       run: rsync-ssl --no-motd download.samba.org::rsyncftp/ || true
+#     - name: save artifact
+diff --git a/testsuite/clean-fname-underflow.test b/testsuite/clean-fname-underflow.test
+index 262a4f07..2e540d52 100644
+--- a/testsuite/clean-fname-underflow.test
++++ b/testsuite/clean-fname-underflow.test
+@@ -9,12 +9,25 @@
+ 
+ set -eu
+ 
++# clean_fname() is platform-agnostic; the test only needs to run on one
++# host. Skip on non-Linux to avoid quirks in older /bin/sh implementations
++# (Solaris exited silently here, producing an empty log under set -eu).
++# runtests.sh expects $scratchdir/whyskipped to exist when a test exits 77.
++case "$(uname -s)" in
++  Linux) ;;
++  *)
++    if [ -n "${scratchdir:-}" ]; then
++      echo "Linux-only test (uname -s = $(uname -s))" > "$scratchdir/whyskipped"
++    fi
++    exit 77 ;;
++esac
++
+ # Try to find the just-built rsync binary if RSYNC_BIN isn't set.
+ if [ -z "${RSYNC_BIN:-}" ]; then
+   if [ -x "./rsync" ]; then
+-    RSYNC_BIN=./rsync
++    RSYNC_BIN=$(pwd)/rsync
+   elif [ -x "../rsync" ]; then
+-    RSYNC_BIN=../rsync
++    RSYNC_BIN=$(cd .. && pwd)/rsync
+   else
+     RSYNC_BIN=rsync
+   fi
+diff --git a/usage.c b/usage.c
+index a5b59ad8..f346385f 100644
+--- a/usage.c
++++ b/usage.c
+@@ -293,6 +293,7 @@ void print_rsync_version(enum logcode f)
+ 		json_line("license", "GPLv3");
+ 		json_line("caveat", "rsync comes with ABSOLUTELY NO WARRANTY");
+ 		printf("\n}\n");
++		fflush(stdout);
+ 		return;
+ 	}
+ 
+-- 
+2.51.0
+

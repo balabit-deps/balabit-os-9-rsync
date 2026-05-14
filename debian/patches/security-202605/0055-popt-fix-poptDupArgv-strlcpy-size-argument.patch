@@ -1,0 +1,55 @@
+From f406c780ec57072caf0c8c9eb928089409be659d Mon Sep 17 00:00:00 2001
+From: Andrew Tridgell <andrew@tridgell.net>
+Date: Thu, 7 May 2026 08:55:36 +1000
+Subject: [PATCH 55/60] popt: fix poptDupArgv strlcpy size argument
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+The bundled popt 1.18 (rsync 3.2.7) calls strlcpy(dst, argv[i], nb)
+inside the per-arg loop in poptDupArgv(), where nb is the TOTAL
+allocation size — not the remaining bytes after dst has advanced.
+The actual write was always within the malloc'd buffer, so it was
+silent on older glibcs, but glibc 2.39+ fortified strlcpy compares
+the size argument against __bos(dst) and aborts with "*** buffer
+overflow detected ***" once dst passes through any bytes.
+
+That broke ~15 tests on Ubuntu 24.04 / glibc 2.39 in CI (any test
+spawning a child rsync via popt's argv duplication path). Pass the
+remaining bytes (end_buf - dst) so the size argument matches reality.
+
+Master fixed the same bug differently in popt 1.19 (4c8683c8 "update
+to popt 1.19") by switching to stpcpy, but pulling that 1500-line
+refresh into a security backport is heavier than warranted.
+
+Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
+---
+ popt/poptparse.c | 12 +++++++++---
+ 1 file changed, 9 insertions(+), 3 deletions(-)
+
+diff --git a/popt/poptparse.c b/popt/poptparse.c
+index e003a04a..06e39f5d 100644
+--- a/popt/poptparse.c
++++ b/popt/poptparse.c
+@@ -36,9 +36,15 @@ int poptDupArgv(int argc, const char **argv,
+     dst += (argc + 1) * sizeof(*argv);
+ 
+     /*@-branchstate@*/
+-    for (i = 0; i < argc; i++) {
+-	argv2[i] = dst;
+-	dst += strlcpy(dst, argv[i], nb) + 1;
++    {
++	char * const end_buf = (char *)argv2 + nb;
++	for (i = 0; i < argc; i++) {
++	    argv2[i] = dst;
++	    /* nb is the TOTAL buffer size, not the remaining bytes; use the
++	     * remaining bytes from dst to end_buf so glibc 2.39+ fortified
++	     * strlcpy doesn't trip __bos() and abort. */
++	    dst += strlcpy(dst, argv[i], end_buf - dst) + 1;
++	}
+     }
+     /*@=branchstate@*/
+     argv2[argc] = NULL;
+-- 
+2.51.0
+

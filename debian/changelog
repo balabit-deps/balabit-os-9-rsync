@@ -1,3 +1,20 @@
+rsync (3.2.7-0ubuntu0.22.04.6) jammy-security; urgency=medium
+
+  * SECURITY UPDATE: May 2026 security issues
+    - debian/patches/security-202605/*.patch: commits to backport security
+      fixes to 3.2.7.
+    - d/p/CVE-2024-*/*.patch: removed, included in patch cluster.
+    - CVE-2025-10158
+    - CVE-2026-29518
+    - CVE-2026-41035
+    - CVE-2026-43617
+    - CVE-2026-43618
+    - CVE-2026-43619
+    - CVE-2026-43620
+    - CVE-2026-45232
+
+ -- Marc Deslauriers <marc.deslauriers@ubuntu.com>  Thu, 14 May 2026 11:16:31 +0200
+
 rsync (3.2.7-0ubuntu0.22.04.4) jammy-security; urgency=medium
 
   * SECURITY REGRESSION: flag collision (LP: #2095004)

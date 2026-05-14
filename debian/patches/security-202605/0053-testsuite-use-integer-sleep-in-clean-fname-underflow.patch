@@ -1,0 +1,32 @@
+From 189612f94aa2bddb5036dddeb3144c28071b95f5 Mon Sep 17 00:00:00 2001
+From: Andrew Tridgell <andrew@tridgell.net>
+Date: Thu, 7 May 2026 08:06:28 +1000
+Subject: [PATCH 53/60] testsuite: use integer sleep in
+ clean-fname-underflow.test
+
+Solaris /usr/bin/sleep is POSIX and rejects fractional seconds, which
+made the test abort silently under `set -eu` (empty log, FAIL). One
+second is more than enough for the daemon to listen.
+
+Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
+---
+ testsuite/clean-fname-underflow.test | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/testsuite/clean-fname-underflow.test b/testsuite/clean-fname-underflow.test
+index 56d4fece..262a4f07 100644
+--- a/testsuite/clean-fname-underflow.test
++++ b/testsuite/clean-fname-underflow.test
+@@ -40,7 +40,8 @@ PORT=$(awk 'BEGIN{srand(); printf "%d", 20000+int(rand()*20000)}')
+ "$RSYNC_BIN" --daemon --no-detach --config=rsyncd.conf --port="$PORT" >/dev/null 2>&1 &
+ DAEMON_PID=$!
+ # Give the daemon a moment to come up.
+-sleep 0.3
++# Use integer second; subsecond sleep is not portable (e.g. Solaris /usr/bin/sleep).
++sleep 1
+ 
+ # Invoke the server-side path. We don't need a real transfer; we just want to
+ # ensure clean_fname() doesn't crash when given "a/../test" via --filter=merge.
+-- 
+2.51.0
+

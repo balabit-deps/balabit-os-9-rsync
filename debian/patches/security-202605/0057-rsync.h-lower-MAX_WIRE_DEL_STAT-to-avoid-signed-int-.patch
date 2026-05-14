@@ -1,0 +1,55 @@
+From 0beceb95ac5ff9032d5426b60f5f1c4519339a7c Mon Sep 17 00:00:00 2001
+From: Andrew Tridgell <andrew@tridgell.net>
+Date: Thu, 14 May 2026 14:45:21 +1000
+Subject: [PATCH 57/60] rsync.h: lower MAX_WIRE_DEL_STAT to avoid signed-int
+ overflow in read_del_stats
+
+read_del_stats() in main.c accumulates 5 wire-supplied counts into
+the int32 stats.deleted_files field:
+
+    stats.deleted_files  = read_varint_bounded(..., MAX_WIRE_DEL_STAT, ...);
+    stats.deleted_files += stats.deleted_dirs     = ...;
+    stats.deleted_files += stats.deleted_symlinks = ...;
+    stats.deleted_files += stats.deleted_devices  = ...;
+    stats.deleted_files += stats.deleted_specials = ...;
+
+With the previous MAX_WIRE_DEL_STAT = 2^30 (1.07 GB) the worst-case
+sum is 5 * 2^30 = 5.37 GB; three maximal values already exceed
+INT32_MAX = 2.15 GB on the third "+=", triggering signed integer
+overflow (C99 6.5/5 -- undefined behaviour, the compiler may assume
+it cannot happen and elide subsequent checks).
+
+The bound was introduced in f0155902 ("defence-in-depth: bound
+wire-supplied counts and lengths") with a commit message claiming
+"per-summand cap so the total can't overflow", but 2^30 * 5 does
+overflow.  Lower the per-summand cap to 2^28 (= 268M) so the worst
+case is 5 * 2^28 = 1.34 GB < INT32_MAX with margin.  2^28 deletions
+per category is still vastly above any plausible real transfer.
+
+Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
+---
+ rsync.h | 8 +++++++-
+ 1 file changed, 7 insertions(+), 1 deletion(-)
+
+diff --git a/rsync.h b/rsync.h
+index c419a9d6..1c45eef7 100644
+--- a/rsync.h
++++ b/rsync.h
+@@ -178,7 +178,13 @@
+ #define MAX_WIRE_XATTR_DATALEN ((int32)0x7fffffff)
+ #define MAX_WIRE_ACL_COUNT     65536
+ #define MAX_WIRE_NSEC          999999999
+-#define MAX_WIRE_DEL_STAT      ((int32)1 << 30)
++/* MAX_WIRE_DEL_STAT is the per-category cap for read_del_stats() in main.c,
++ * which accumulates 5 wire-supplied counts into the int32 stats.deleted_files
++ * accumulator.  Capped at 2^28 so 5 * 2^28 = 1.34 GB stays under INT32_MAX
++ * (2.15 GB) with margin -- a higher cap (e.g. 2^30) would let a hostile peer
++ * supplying 3+ max-sized counts overflow the accumulator, which is signed-int
++ * UB.  2^28 is still well above any plausible real transfer's deletion count. */
++#define MAX_WIRE_DEL_STAT      ((int32)1 << 28)
+ 
+ #define ROUND_UP_1024(siz) ((siz) & (1024-1) ? ((siz) | (1024-1)) + 1 : (siz))
+ 
+-- 
+2.51.0
+

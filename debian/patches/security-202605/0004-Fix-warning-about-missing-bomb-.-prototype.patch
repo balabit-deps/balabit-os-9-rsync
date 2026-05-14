@@ -1,0 +1,36 @@
+From 77b7f5e0aa546f1f343c97dcd186aa05a8f18791 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Holger=20Hoffst=C3=A4tte?= <holger@applied-asynchrony.com>
+Date: Mon, 4 Sep 2023 14:05:21 +0200
+Subject: [PATCH 04/60] Fix warning about missing bomb(..) prototype
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Clang rightfully complains about invoking bomb(..) without a proper prototype:
+  lib/pool_alloc.c:171:16: warning: passing arguments to a function without a prototype
+  is deprecated in all versions of C and is not supported in C2x [-Wdeprecated-non-prototype]
+                (*pool->bomb)(bomb_msg, __FILE__, __LINE__);
+                             ^
+1 warning generated.
+
+Signed-off-by: Holger Hoffstätte <holger@applied-asynchrony.com>
+---
+ lib/pool_alloc.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/lib/pool_alloc.c b/lib/pool_alloc.c
+index a1a7245f..bc1cc1a6 100644
+--- a/lib/pool_alloc.c
++++ b/lib/pool_alloc.c
+@@ -9,7 +9,7 @@ struct alloc_pool
+ 	size_t			size;		/* extent size		*/
+ 	size_t			quantum;	/* allocation quantum	*/
+ 	struct pool_extent	*extents;	/* top extent is "live" */
+-	void			(*bomb)();	/* called if malloc fails */
++	void			(*bomb)(const char*, const char*, int);	/* called if malloc fails */
+ 	int			flags;
+ 
+ 	/* statistical data */
+-- 
+2.51.0
+

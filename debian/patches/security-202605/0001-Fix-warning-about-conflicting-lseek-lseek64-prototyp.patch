@@ -1,0 +1,49 @@
+From 9585830e1e08ac84454832c6b91bf726d2b0f8d7 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Holger=20Hoffst=C3=A4tte?= <holger@applied-asynchrony.com>
+Date: Mon, 4 Sep 2023 14:07:14 +0200
+Subject: [PATCH 01/60] Fix warning about conflicting lseek/lseek64 prototypes
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Clang rightfully complains about conflicting prototypes, as both lseek() variants
+are redefined:
+
+  syscall.c:394:10: warning: a function declaration without a prototype is deprecated
+  in all versions of C and is treated as a zero-parameter prototype in C2x, conflicting
+  with a previous declaration [-Wdeprecated-non-prototype]
+        off64_t lseek64();
+                ^
+/usr/include/unistd.h:350:18: note: conflicting prototype is here
+extern __off64_t lseek64 (int __fd, __off64_t __offset, int __whence)
+                 ^
+1 warning generated.
+
+The point of the #ifdef is to build for the configured OFF_T; there is
+no reason to redefine lseek/lseek64, which should have been found
+via configure.
+
+Signed-off-by: Holger Hoffstätte <holger@applied-asynchrony.com>
+---
+ syscall.c | 5 -----
+ 1 file changed, 5 deletions(-)
+
+diff --git a/syscall.c b/syscall.c
+index d92074aa..b4b0f1f1 100644
+--- a/syscall.c
++++ b/syscall.c
+@@ -388,11 +388,6 @@ int do_fstat(int fd, STRUCT_STAT *st)
+ OFF_T do_lseek(int fd, OFF_T offset, int whence)
+ {
+ #ifdef HAVE_LSEEK64
+-#if !SIZEOF_OFF64_T
+-	OFF_T lseek64();
+-#else
+-	off64_t lseek64();
+-#endif
+ 	return lseek64(fd, offset, whence);
+ #else
+ 	return lseek(fd, offset, whence);
+-- 
+2.51.0
+
