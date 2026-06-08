@@ -1,0 +1,41 @@
+From f57e8f91cbad7f724e8b991d805eddbd7d368a3f Mon Sep 17 00:00:00 2001
+From: Zen Dodd <mail@steadytao.com>
+Date: Thu, 4 Jun 2026 00:59:48 +1000
+Subject: [PATCH 68/81] fix: install generated manpages out of tree
+
+(cherry picked from commit 2095a62808645200751dbc3d6a31608c09031ff2)
+---
+ Makefile.in | 15 +++++++++++----
+ 1 file changed, 11 insertions(+), 4 deletions(-)
+
+diff --git a/Makefile.in b/Makefile.in
+index 5c2b9a5a..f7bd6b53 100644
+--- a/Makefile.in
++++ b/Makefile.in
+@@ -83,12 +83,19 @@ install: all
+ 	$(INSTALLCMD) -m 755 $(srcdir)/rsync-ssl $(DESTDIR)$(bindir)
+ 	-$(MKDIR_P) $(DESTDIR)$(mandir)/man1
+ 	-$(MKDIR_P) $(DESTDIR)$(mandir)/man5
+-	if test -f rsync.1; then $(INSTALLMAN) -m 644 rsync.1 $(DESTDIR)$(mandir)/man1; fi
+-	if test -f rsync-ssl.1; then $(INSTALLMAN) -m 644 rsync-ssl.1 $(DESTDIR)$(mandir)/man1; fi
+-	if test -f rsyncd.conf.5; then $(INSTALLMAN) -m 644 rsyncd.conf.5 $(DESTDIR)$(mandir)/man5; fi
++	for fn in rsync.1 rsync-ssl.1; do \
++	    if test -f $$fn; then $(INSTALLMAN) -m 644 $$fn $(DESTDIR)$(mandir)/man1; \
++	    elif test -f $(srcdir)/$$fn; then $(INSTALLMAN) -m 644 $(srcdir)/$$fn $(DESTDIR)$(mandir)/man1; fi; \
++	done
++	for fn in rsyncd.conf.5; do \
++	    if test -f $$fn; then $(INSTALLMAN) -m 644 $$fn $(DESTDIR)$(mandir)/man5; \
++	    elif test -f $(srcdir)/$$fn; then $(INSTALLMAN) -m 644 $(srcdir)/$$fn $(DESTDIR)$(mandir)/man5; fi; \
++	done
+ 	if test "$(with_rrsync)" = yes; then \
+ 	    $(INSTALLCMD) -m 755 rrsync $(DESTDIR)$(bindir); \
+-	    if test -f rrsync.1; then $(INSTALLMAN) -m 644 rrsync.1 $(DESTDIR)$(mandir)/man1; fi; \
++	    fn=rrsync.1; \
++	    if test -f $$fn; then $(INSTALLMAN) -m 644 $$fn $(DESTDIR)$(mandir)/man1; \
++	    elif test -f $(srcdir)/$$fn; then $(INSTALLMAN) -m 644 $(srcdir)/$$fn $(DESTDIR)$(mandir)/man1; fi; \
+ 	fi
+ 
+ install-ssl-daemon: stunnel-rsyncd.conf
+-- 
+2.53.0
+

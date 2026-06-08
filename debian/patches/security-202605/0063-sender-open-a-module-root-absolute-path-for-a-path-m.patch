@@ -1,0 +1,50 @@
+From ab7d8e9df3dd1f2d2acc56c49c7d0c70420f8883 Mon Sep 17 00:00:00 2001
+From: Andrew Tridgell <andrew@tridgell.net>
+Date: Wed, 3 Jun 2026 20:48:10 +1000
+Subject: [PATCH 63/81] sender: open a module-root-absolute path for a `path =
+ /` module (#897)
+
+A daemon module with path=/ makes F_PATHNAME absolute, so the secure_path built
+for the content open starts with '/'.  secure_relative_open() rejects an
+absolute relpath with EINVAL, so a use-chroot=no daemon with path=/ could not
+send any file ('failed to open ...: Invalid argument (22)') -- a regression
+from 3.4.2.  Strip leading slashes to a module-relative path; resolution stays
+confined beneath module_dir.
+
+Thanks to @moonlitbugs for the report (#897).
+
+(cherry picked from commit 9886a06610370b3219ea9a29753388e261f4853d)
+---
+ sender.c | 9 ++++++++-
+ 1 file changed, 8 insertions(+), 1 deletion(-)
+
+diff --git a/sender.c b/sender.c
+index 033f87e5..32913af0 100644
+--- a/sender.c
++++ b/sender.c
+@@ -362,6 +362,7 @@ void send_files(int f_in, int f_out)
+ 			 * Reconstruct the full path relative to module_dir
+ 			 * from F_PATHNAME (path) and f_name (fname). */
+ 			char secure_path[MAXPATHLEN];
++			const char *relp;
+ 			int slen = snprintf(secure_path, sizeof secure_path, "%s%s%s", path, slash, fname);
+ 			if (slen >= (int)sizeof secure_path) {
+ 				io_error |= IOERR_GENERAL;
+@@ -371,7 +372,13 @@ void send_files(int f_in, int f_out)
+ 					send_msg_int(MSG_NO_SEND, ndx);
+ 				continue;
+ 			}
+-			fd = secure_relative_open(module_dir, secure_path, O_RDONLY, 0);
++			/* A module with `path = /` makes F_PATHNAME absolute, so the
++			 * joined path starts with '/'; strip leading slashes to a
++			 * module-relative path that secure_relative_open accepts (#897). */
++			relp = secure_path;
++			while (*relp == '/')
++				relp++;
++			fd = secure_relative_open(module_dir, relp, O_RDONLY, 0);
+ 		} else {
+ 			fd = do_open_checklinks(fname);
+ 		}
+-- 
+2.53.0
+

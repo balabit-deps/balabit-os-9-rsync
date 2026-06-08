@@ -1,0 +1,257 @@
+From a9d1101fd373ebdaeeb91059571e10d4969fdc1b Mon Sep 17 00:00:00 2001
+From: Andrew Tridgell <andrew@tridgell.net>
+Date: Sat, 6 Jun 2026 15:37:25 +1000
+Subject: [PATCH 74/81] build: openat2 autodetect + android probe (R1
+ #924/#905/#900, R10 #904)
+
+configure now probes for <linux/openat2.h> + SYS_openat2 and defines
+HAVE_OPENAT2 only when both are present; syscall.c gates the openat2 include
+and the openat2(RESOLVE_BENEATH) tier on HAVE_OPENAT2, so the build no longer
+fails on kernels/headers that lack the openat2 header (3.4.3 included it
+unconditionally on Linux).  android.c probes openat2 usability behind a SIGSYS
+handler so the Android/Termux seccomp sandbox falls back to the portable
+resolver instead of killing the process.
+
+Backport combining c73e0063, 83a24c21, the syscall.c guards from 1d5b5ab8, and
+4634b0ad; the --disable-openat2/gcov coverage knobs and test changes are omitted.
+
+Thanks to @mmayer (#924), @fda77 (#905), @darkshram (#900) and @ketas (#904) for the reports.
+
+(cherry picked from commit 1cff146a1280854866518efaeff44982f5c2304d)
+---
+ Makefile.in  | 12 ++++----
+ android.c    | 82 ++++++++++++++++++++++++++++++++++++++++++++++++++++
+ configure.ac | 22 ++++++++++++++
+ syscall.c    | 23 +++++++++++----
+ 4 files changed, 128 insertions(+), 11 deletions(-)
+ create mode 100644 android.c
+
+diff --git a/Makefile.in b/Makefile.in
+index f7bd6b53..9b0b9f51 100644
+--- a/Makefile.in
++++ b/Makefile.in
+@@ -44,7 +44,7 @@ LIBOBJ=lib/wildmatch.o lib/compat.o lib/snprintf.o lib/mdfour.o lib/md5.o \
+ zlib_OBJS=zlib/deflate.o zlib/inffast.o zlib/inflate.o zlib/inftrees.o \
+ 	zlib/trees.o zlib/zutil.o zlib/adler32.o zlib/compress.o zlib/crc32.o
+ OBJS1=flist.o rsync.o generator.o receiver.o cleanup.o sender.o exclude.o \
+-	util1.o util2.o main.o checksum.o match.o syscall.o log.o backup.o delete.o
++	util1.o util2.o main.o checksum.o match.o syscall.o android.o log.o backup.o delete.o
+ OBJS2=options.o io.o compat.o hlink.o token.o uidlist.o socket.o hashtable.o \
+ 	usage.o fileio.o batch.o clientname.o chmod.o acls.o xattrs.o
+ OBJS3=progress.o pipe.o @MD5_ASM@ @ROLL_SIMD@ @ROLL_ASM@
+@@ -53,7 +53,7 @@ popt_OBJS=popt/findme.o  popt/popt.o  popt/poptconfig.o \
+ 	popt/popthelp.o popt/poptparse.o
+ OBJS=$(OBJS1) $(OBJS2) $(OBJS3) $(DAEMON_OBJ) $(LIBOBJ) @BUILD_ZLIB@ @BUILD_POPT@
+ 
+-TLS_OBJ = tls.o syscall.o util2.o t_stub.o lib/compat.o lib/snprintf.o lib/permstring.o lib/sysxattrs.o @BUILD_POPT@
++TLS_OBJ = tls.o syscall.o android.o util2.o t_stub.o lib/compat.o lib/snprintf.o lib/permstring.o lib/sysxattrs.o @BUILD_POPT@
+ 
+ # Programs we must have to run the test cases
+ CHECK_PROGS = rsync$(EXEEXT) tls$(EXEEXT) getgroups$(EXEEXT) getfsdev$(EXEEXT) \
+@@ -178,19 +178,19 @@ getgroups$(EXEEXT): getgroups.o
+ getfsdev$(EXEEXT): getfsdev.o
+ 	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ getfsdev.o $(LIBS)
+ 
+-TRIMSLASH_OBJ = trimslash.o syscall.o util2.o t_stub.o lib/compat.o lib/snprintf.o
++TRIMSLASH_OBJ = trimslash.o syscall.o android.o util2.o t_stub.o lib/compat.o lib/snprintf.o
+ trimslash$(EXEEXT): $(TRIMSLASH_OBJ)
+ 	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $(TRIMSLASH_OBJ) $(LIBS)
+ 
+-T_UNSAFE_OBJ = t_unsafe.o syscall.o util1.o util2.o t_stub.o lib/compat.o lib/snprintf.o lib/wildmatch.o
++T_UNSAFE_OBJ = t_unsafe.o syscall.o android.o util1.o util2.o t_stub.o lib/compat.o lib/snprintf.o lib/wildmatch.o
+ t_unsafe$(EXEEXT): $(T_UNSAFE_OBJ)
+ 	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $(T_UNSAFE_OBJ) $(LIBS)
+ 
+-T_CHMOD_SECURE_OBJ = t_chmod_secure.o syscall.o util1.o util2.o t_stub.o lib/compat.o lib/snprintf.o lib/wildmatch.o lib/permstring.o
++T_CHMOD_SECURE_OBJ = t_chmod_secure.o syscall.o android.o util1.o util2.o t_stub.o lib/compat.o lib/snprintf.o lib/wildmatch.o lib/permstring.o
+ t_chmod_secure$(EXEEXT): $(T_CHMOD_SECURE_OBJ)
+ 	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $(T_CHMOD_SECURE_OBJ) $(LIBS)
+ 
+-T_SECURE_RELPATH_OBJ = t_secure_relpath.o syscall.o util1.o util2.o t_stub.o lib/compat.o lib/snprintf.o lib/wildmatch.o lib/permstring.o
++T_SECURE_RELPATH_OBJ = t_secure_relpath.o syscall.o android.o util1.o util2.o t_stub.o lib/compat.o lib/snprintf.o lib/wildmatch.o lib/permstring.o
+ t_secure_relpath$(EXEEXT): $(T_SECURE_RELPATH_OBJ)
+ 	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $(T_SECURE_RELPATH_OBJ) $(LIBS)
+ 
+diff --git a/android.c b/android.c
+new file mode 100644
+index 00000000..0094b61e
+--- /dev/null
++++ b/android.c
+@@ -0,0 +1,82 @@
++/*
++ * Android-specific helpers.
++ *
++ * openat2() usability probe
++ * -------------------------
++ * openat2(2) is invoked directly via syscall() because the C library lacked a
++ * wrapper for it for years.  Under a seccomp filter that uses
++ * SECCOMP_RET_TRAP -- as the Android application sandbox does -- a disallowed
++ * syscall raises SIGSYS and *kills the process* rather than failing with
++ * ENOSYS, so inspecting errno after the call is too late.  We therefore probe
++ * openat2() once, behind a temporary SIGSYS handler, so a trapped syscall is
++ * caught and secure_relative_open_linux() can fall back to the portable
++ * per-component O_NOFOLLOW resolver instead of the whole process dying.
++ *
++ * This is only needed on Android, so the probe body is compiled only there.
++ * __ANDROID__ is defined by Bionic's headers and reflects the *target*, not
++ * the build host: it is set both for NDK cross-compiles (from a Linux/macOS
++ * host) and for native Termux builds, and is unset on every other platform.
++ * That makes it a reliable compile-time switch for cross builds -- there is
++ * nothing to detect in configure.  Everywhere else openat2() is never
++ * seccomp-trapped to SIGSYS (a missing syscall simply returns ENOSYS), so
++ * openat2_usable() collapses to a constant 1 with no run-time cost.
++ */
++
++#include "rsync.h"
++
++#if defined(__ANDROID__) && defined(HAVE_OPENAT2)
++
++#include <setjmp.h>
++#include <sys/syscall.h>
++#include <linux/openat2.h>
++
++static sigjmp_buf openat2_probe_env;
++
++static void openat2_probe_handler(int signo)
++{
++	(void)signo;
++	siglongjmp(openat2_probe_env, 1);
++}
++
++#endif
++
++int openat2_usable(void)
++{
++#if defined(__ANDROID__) && defined(HAVE_OPENAT2)
++	static int cached = -1;
++	struct sigaction sa, old_sa;
++
++	if (cached >= 0)
++		return cached;
++
++	memset(&sa, 0, sizeof sa);
++	sa.sa_handler = openat2_probe_handler;
++	sigemptyset(&sa.sa_mask);
++	if (sigaction(SIGSYS, &sa, &old_sa) != 0)
++		return cached = 0;
++
++	if (sigsetjmp(openat2_probe_env, 1) != 0) {
++		/* SIGSYS delivered: openat2 is blocked by a seccomp filter. */
++		cached = 0;
++	} else {
++		struct open_how how;
++		int fd;
++		memset(&how, 0, sizeof how);
++		how.flags = O_RDONLY | O_DIRECTORY;
++		how.resolve = RESOLVE_BENEATH | RESOLVE_NO_MAGICLINKS;
++		fd = syscall(SYS_openat2, AT_FDCWD, ".", &how, sizeof how);
++		if (fd >= 0)
++			close(fd);
++		/* Usable only if the probe actually succeeded.  Any failure --
++		 * ENOSYS (kernel < 5.6), a seccomp SECCOMP_RET_ERRNO denial
++		 * (EPERM/EACCES), or EINVAL (RESOLVE_BENEATH unsupported) --
++		 * means we must fall back to the portable O_NOFOLLOW walk. */
++		cached = fd >= 0;
++	}
++
++	sigaction(SIGSYS, &old_sa, NULL);
++	return cached;
++#else
++	return 1;
++#endif
++}
+diff --git a/configure.ac b/configure.ac
+index 8fb6a992..0ababc1f 100644
+--- a/configure.ac
++++ b/configure.ac
+@@ -331,6 +331,28 @@ AC_COMPILE_IFELSE([AC_LANG_PROGRAM([[ ]], [[return 0;]])],
+ CFLAGS="$OLD_CFLAGS"
+ AC_SUBST(NOEXECSTACK)
+ 
++dnl Only define HAVE_OPENAT2 when both the <linux/openat2.h> header and the
++dnl SYS_openat2 syscall number are present.  syscall.c uses openat2(RESOLVE_BENEATH)
++dnl for the secure resolver on Linux 5.6+; defining it unconditionally broke the
++dnl build on older kernels/headers that lack the header (#924, #905, #900).
++AC_CACHE_CHECK([for openat2],rsync_cv_HAVE_OPENAT2,[
++    AC_COMPILE_IFELSE([
++        AC_LANG_PROGRAM([[
++#include <sys/syscall.h>
++#include <linux/openat2.h>
++]], [[
++struct open_how how;
++how.resolve = RESOLVE_BENEATH;
++return SYS_openat2 + (int)how.resolve;
++]])
++    ],
++    [rsync_cv_HAVE_OPENAT2=yes], [rsync_cv_HAVE_OPENAT2=no])
++])
++if test x"$rsync_cv_HAVE_OPENAT2" = x"yes"; then
++  AC_DEFINE([HAVE_OPENAT2], 1,
++    [Define to use Linux openat2(RESOLVE_BENEATH) in secure_relative_open where available.])
++fi
++
+ # arrgh. libc in some old debian version screwed up the largefile
+ # stuff, getting byte range locking wrong
+ AC_CACHE_CHECK([for broken largefile support],rsync_cv_HAVE_BROKEN_LARGEFILE,[
+diff --git a/syscall.c b/syscall.c
+index 95be2ac4..cadc382a 100644
+--- a/syscall.c
++++ b/syscall.c
+@@ -33,7 +33,7 @@
+ #include <sys/syscall.h>
+ #endif
+ 
+-#ifdef __linux__
++#if defined(__linux__) && defined(HAVE_OPENAT2)
+ #include <sys/syscall.h>
+ #include <linux/openat2.h>
+ #endif
+@@ -1688,7 +1688,20 @@ static int path_has_dotdot_component(const char *path)
+ 	return 0;
+ }
+ 
+-#ifdef __linux__
++#if defined(__linux__) && defined(HAVE_OPENAT2)
++/* openat2(RESOLVE_BENEATH) via the raw syscall, gated on openat2_usable() so a
++ * seccomp filter that traps openat2 with SIGSYS (e.g. the Android sandbox)
++ * makes us report ENOSYS and fall back rather than killing the process.  Only
++ * the openat2 call is gated here; a plain openat() is always safe to attempt. */
++static int openat2_beneath(int dirfd, const char *path, const struct open_how *how)
++{
++	if (!openat2_usable()) {
++		errno = ENOSYS;
++		return -1;
++	}
++	return syscall(SYS_openat2, dirfd, path, how, sizeof *how);
++}
++
+ static int secure_relative_open_linux(const char *basedir, const char *relpath, int flags, mode_t mode)
+ {
+ 	struct open_how how;
+@@ -1717,12 +1730,12 @@ static int secure_relative_open_linux(const char *basedir, const char *relpath,
+ 		memset(&bhow, 0, sizeof bhow);
+ 		bhow.flags = O_RDONLY | O_DIRECTORY;
+ 		bhow.resolve = RESOLVE_BENEATH | RESOLVE_NO_MAGICLINKS;
+-		dirfd = syscall(SYS_openat2, AT_FDCWD, basedir, &bhow, sizeof bhow);
++		dirfd = openat2_beneath(AT_FDCWD, basedir, &bhow);
+ 		if (dirfd == -1)
+ 			return -1;
+ 	}
+ 
+-	retfd = syscall(SYS_openat2, dirfd, relpath, &how, sizeof how);
++	retfd = openat2_beneath(dirfd, relpath, &how);
+ 
+ 	if (dirfd != AT_FDCWD)
+ 		close(dirfd);
+@@ -1848,7 +1861,7 @@ int secure_relative_open(const char *basedir, const char *relpath, int flags, mo
+ 		}
+ 	}
+ 
+-#ifdef __linux__
++#if defined(__linux__) && defined(HAVE_OPENAT2)
+ 	{
+ 		int fd = secure_relative_open_linux(basedir, relpath, flags, mode);
+ 		/* ENOSYS = kernel < 5.6 doesn't have the syscall even though
+-- 
+2.53.0
+

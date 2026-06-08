@@ -1,20 +1,21 @@
-From efb85fd8db9e8f74eb3ab91ebf44f6ed35e3da5b Mon Sep 17 00:00:00 2001
+From a99181092840126e390d5330d8617e84efd50fc1 Mon Sep 17 00:00:00 2001
 From: Natanael Copa <ncopa@alpinelinux.org>
 Date: Wed, 15 Jan 2025 15:10:24 +0100
-Subject: [PATCH] Fix FLAG_GOT_DIR_FLIST collission with FLAG_HLINKED
+Subject: [PATCH 79/81] Fix FLAG_GOT_DIR_FLIST collission with FLAG_HLINKED
 
 fixes commit 688f5c379a43 (Refuse a duplicate dirlist.)
 
 Fixes: https://github.com/RsyncProject/rsync/issues/702
 Fixes: https://github.com/RsyncProject/rsync/issues/697
+(cherry picked from commit 996af4a79f9afe4d7158ecdd87c78cee382c6b39)
 ---
  rsync.h | 2 +-
  1 file changed, 1 insertion(+), 1 deletion(-)
 
-Index: rsync-3.2.7/rsync.h
-===================================================================
---- rsync-3.2.7.orig/rsync.h
-+++ rsync-3.2.7/rsync.h
+diff --git a/rsync.h b/rsync.h
+index 1c45eef7..ee4f4d34 100644
+--- a/rsync.h
++++ b/rsync.h
 @@ -84,7 +84,6 @@
  #define FLAG_DUPLICATE (1<<4)	/* sender */
  #define FLAG_MISSING_DIR (1<<4)	/* generator */
@@ -31,3 +32,6 @@ Index: rsync-3.2.7/rsync.h
  
  /* These flags are passed to functions but not stored. */
  
+-- 
+2.53.0
+

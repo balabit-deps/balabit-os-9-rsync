@@ -1,0 +1,35 @@
+From cc14f113bc7455cd1dbc890ef10e2c02b6e1cfec Mon Sep 17 00:00:00 2001
+From: Zen Dodd <mail@steadytao.com>
+Date: Thu, 4 Jun 2026 00:34:27 +1000
+Subject: [PATCH 70/81] fix: daemon upload delete stats
+
+(cherry picked from commit 7259eae560a4306494ada53b51a0a3029902844b)
+---
+ generator.c | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/generator.c b/generator.c
+index e88bf089..84eab1a6 100644
+--- a/generator.c
++++ b/generator.c
+@@ -2390,7 +2390,7 @@ void generate_files(int f_out, const char *local_name)
+ 		write_ndx(f_out, NDX_DONE);
+ 
+ 	if (protocol_version >= 31 && EARLY_DELETE_DONE_MSG()) {
+-		if ((INFO_GTE(STATS, 2) && (delete_mode || force_delete)) || read_batch)
++		if (delete_mode || force_delete || read_batch)
+ 			write_del_stats(f_out);
+ 		if (EARLY_DELAY_DONE_MSG()) /* Can't send this before delay */
+ 			write_ndx(f_out, NDX_DONE);
+@@ -2435,7 +2435,7 @@ void generate_files(int f_out, const char *local_name)
+ 
+ 	if (protocol_version >= 31) {
+ 		if (!EARLY_DELETE_DONE_MSG()) {
+-			if (INFO_GTE(STATS, 2) || read_batch)
++			if (delete_mode || force_delete || read_batch)
+ 				write_del_stats(f_out);
+ 			write_ndx(f_out, NDX_DONE);
+ 		}
+-- 
+2.53.0
+

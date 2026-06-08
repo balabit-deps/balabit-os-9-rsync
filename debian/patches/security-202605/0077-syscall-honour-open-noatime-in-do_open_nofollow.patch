@@ -1,0 +1,32 @@
+From ea73d877a22eeb2e603aeda39adb61cad69e3366 Mon Sep 17 00:00:00 2001
+From: Andrew Tridgell <andrew@tridgell.net>
+Date: Sun, 7 Jun 2026 19:31:22 +1000
+Subject: [PATCH 77/81] syscall: honour --open-noatime in do_open_nofollow
+
+do_open_nofollow() -- the O_NOFOLLOW read path the sender uses for local
+transfers via do_open_checklinks() -- never injected O_NOATIME, so
+--open-noatime was dropped and reading a source file bumped its atime.  Mirror
+do_open()/do_open_at(); caught by the open-noatime test on strict-atime Linux.
+---
+ syscall.c | 5 +++++
+ 1 file changed, 5 insertions(+)
+
+diff --git a/syscall.c b/syscall.c
+index cadc382a..1c3d1c9a 100644
+--- a/syscall.c
++++ b/syscall.c
+@@ -1612,6 +1612,11 @@ int do_open_nofollow(const char *pathname, int flags)
+ #endif
+ 	}
+ 
++#ifdef O_NOATIME
++	if (open_noatime)
++		flags |= O_NOATIME;
++#endif
++
+ #ifdef O_NOFOLLOW
+ 	fd = open(pathname, flags|O_NOFOLLOW);
+ #else
+-- 
+2.53.0
+

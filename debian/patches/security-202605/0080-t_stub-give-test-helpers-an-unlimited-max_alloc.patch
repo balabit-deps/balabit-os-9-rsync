@@ -1,0 +1,32 @@
+From 195b48d143efb28de7f827e753fa93643c193479 Mon Sep 17 00:00:00 2001
+From: Andrew Tridgell <andrew@tridgell.net>
+Date: Mon, 8 Jun 2026 11:30:42 +1000
+Subject: [PATCH 80/81] t_stub: give test helpers an unlimited max_alloc
+
+Helpers link util2.o but not options.c, so they used the stub's
+max_alloc = 0, which makes every my_alloc()/my_strdup() in util2.c abort
+with "exceeded --max-alloc=0". The secure_relative_open() fallback path
+hits my_strdup() and aborts. Set max_alloc = (size_t)-1.
+---
+ t_stub.c | 5 ++++-
+ 1 file changed, 4 insertions(+), 1 deletion(-)
+
+diff --git a/t_stub.c b/t_stub.c
+index 32659b4a..62940cd7 100644
+--- a/t_stub.c
++++ b/t_stub.c
+@@ -36,7 +36,10 @@ int preserve_perms = 0;
+ int preserve_executability = 0;
+ int omit_link_times = 0;
+ int open_noatime = 0;
+-size_t max_alloc = 0; /* max_alloc is needed when combined with util2.o */
++size_t max_alloc = (size_t)-1; /* unlimited: helpers link util2.o, where 0 makes
++			       * every my_alloc()/my_strdup() abort with
++			       * "exceeded --max-alloc=0" (hit on the
++			       * secure_relative_open() fallback path). */
+ char *partial_dir;
+ char *module_dir;
+ /* curr_dir[]/curr_dir_len (read by secure_relative_open) are defined in
+-- 
+2.53.0
+

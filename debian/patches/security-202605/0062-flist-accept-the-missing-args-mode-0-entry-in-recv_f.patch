@@ -1,0 +1,51 @@
+From 980eebde67bc8ee4892a42f1519f05af2cdc6c31 Mon Sep 17 00:00:00 2001
+From: Andrew Tridgell <andrew@tridgell.net>
+Date: Wed, 3 Jun 2026 20:47:56 +1000
+Subject: [PATCH 62/81] flist: accept the missing-args mode-0 entry in
+ recv_file_entry (#910)
+
+--delete-missing-args (missing_args==2) sends a missing --files-from arg as a
+mode-0 entry (IS_MISSING_FILE), the generator's delete signal.  The mode-type
+validation in recv_file_entry() rejected mode 0 as an invalid file type,
+aborting the transfer with 'invalid file mode 00 ... code 2' before the
+generator could act (a regression from 3.4.1).  Allow mode 0 through only when
+missing_args==2 (the delete mode -- not --ignore-missing-args, which never
+sends a mode-0 entry); all other modes are still rejected.
+
+Thanks to @mgkeeley for the report (#910).
+
+(cherry picked from commit 73fe630a70b2aa03646db83448349b843a3dd546)
+---
+ flist.c | 13 +++++++++----
+ 1 file changed, 9 insertions(+), 4 deletions(-)
+
+diff --git a/flist.c b/flist.c
+index 51e76feb..f1c39646 100644
+--- a/flist.c
++++ b/flist.c
+@@ -865,13 +865,18 @@ static struct file_struct *recv_file_entry(int f, struct file_list *flist, int x
+ 		mode = from_wire_mode(read_int(f));
+ 		/* Reject modes whose type bits are not one of the standard
+ 		 * file types; otherwise garbage mode values propagate through
+-		 * the file-type checks below unpredictably. */
+-		if (!S_ISREG(mode) && !S_ISDIR(mode) && !S_ISLNK(mode)
+-		 && !S_ISCHR(mode) && !S_ISBLK(mode)
+-		 && !S_ISFIFO(mode) && !S_ISSOCK(mode)) {
++		 * the file-type checks below unpredictably.  mode 0 is the one
++		 * legitimate exception: --delete-missing-args (missing_args==2)
++		 * sends a missing arg as a mode-0 entry (IS_MISSING_FILE), the
++		 * generator's delete signal (#910). */
++		if (mode != 0 || missing_args != 2) {
++		    if (!S_ISREG(mode) && !S_ISDIR(mode) && !S_ISLNK(mode)
++		     && !S_ISCHR(mode) && !S_ISBLK(mode)
++		     && !S_ISFIFO(mode) && !S_ISSOCK(mode)) {
+ 			rprintf(FERROR, "invalid file mode 0%o for %s [%s]\n",
+ 				(unsigned)mode, lastname, who_am_i());
+ 			exit_cleanup(RERR_PROTOCOL);
++		    }
+ 		}
+ 	}
+ 	if (atimes_ndx && !S_ISDIR(mode) && !(xflags & XMIT_SAME_ATIME)) {
+-- 
+2.53.0
+

@@ -1,0 +1,231 @@
+From 57128940b1c63c726cdedd5a4531d2ff1ed7c5e3 Mon Sep 17 00:00:00 2001
+From: Andrew Tridgell <andrew@tridgell.net>
+Date: Wed, 3 Jun 2026 20:48:10 +1000
+Subject: [PATCH 64/81] syscall/receiver: honour a relative alt-basis dir on a
+ daemon receiver (#915)
+
+The symlink-race hardening routed the receiver's basis open through
+secure_relative_open(), which rejects any '..' -- so a sibling
+--link-dest=../01 on a use-chroot=no daemon was silently ignored and every file
+re-transferred (#915/#928, a regression from 3.4.1).
+
+Narrow the confinement to the sanitizing daemon (am_daemon && !am_chrooted) and
+re-anchor it at the module root, the real trust boundary: secure_relative_open()
+prefixes the cwd's module-relative path (from rsync's logical curr_dir[], a
+guaranteed lexical prefix of module_dir) and resolves beneath module_dir, so
+RESOLVE_BENEATH permits an in-module '..' climb while still rejecting one that
+escapes the module.  secure_basis_open() opens with a bare do_open() in the
+non-sanitizing cases.  t_stub.c gains weak curr_dir[]/curr_dir_len for the
+helpers (via #pragma weak on non-GNU compilers, where rsync.h erases
+__attribute__).
+
+Two tests: link-dest-relative-basis asserts the in-module '..' is honoured;
+link-dest-module-escape asserts a --link-dest=../../OUTSIDE climb that leaves
+the module is refused (not hard-linked to an outside file).  See upstream
+PR #930.
+
+Thanks to @fufu65 (#915) and @JetAppsClark (#928) for the reports.
+
+(cherry picked from commit 948edffb43b56216bcc9932955481ef80a6a69f1)
+---
+ receiver.c | 23 +++++++++++++-
+ syscall.c  | 91 +++++++++++++++++++++++++++++++++++++++++++++++++-----
+ t_stub.c   |  2 ++
+ util1.c    |  4 +--
+ 4 files changed, 109 insertions(+), 11 deletions(-)
+
+diff --git a/receiver.c b/receiver.c
+index 56341a68..e199914f 100644
+--- a/receiver.c
++++ b/receiver.c
+@@ -99,6 +99,27 @@ static int updating_basis_or_equiv;
+  * Anything else is a straight pass-through that preserves the strict contract. */
+ static int secure_basis_open(const char *basedir, const char *relpath, int flags, mode_t mode)
+ {
++	extern int am_daemon, am_chrooted;
++
++	/* The confined resolver is only needed for the sanitizing daemon
++	 * (am_daemon && !am_chrooted, i.e. use_secure_symlinks).  Local /
++	 * remote-shell mode has no module boundary, and "use chroot = yes" makes
++	 * the kernel root the boundary, so there an alt-dest basis like
++	 * --link-dest=../01 must resolve against the cwd as a bare open did before
++	 * the hardening (confining it would reject the legitimate sibling "..",
++	 * #915). */
++	if (!am_daemon || am_chrooted) {
++		if (basedir) {
++			char fullpath[MAXPATHLEN];
++			if (pathjoin(fullpath, sizeof fullpath, basedir, relpath) >= sizeof fullpath) {
++				errno = ENAMETOOLONG;
++				return -1;
++			}
++			return do_open(fullpath, flags, mode);
++		}
++		return do_open(relpath, flags, mode);
++	}
++
+ 	if (!basedir && relpath && *relpath == '/') {
+ 		const char *slash = strrchr(relpath, '/');
+ 		const char *leaf = slash + 1;
+@@ -859,7 +880,7 @@ int recv_files(int f_in, int f_out, char *local_name)
+ 				basedir = basis_dir[0];
+ 				fnamecmp = fname;
+ 				fnamecmp_type = FNAMECMP_BASIS_DIR_LOW;
+-				fd1 = secure_relative_open(basedir, fnamecmp, O_RDONLY, 0);
++				fd1 = secure_basis_open(basedir, fnamecmp, O_RDONLY, 0);
+ 			}
+ 		}
+ 
+diff --git a/syscall.c b/syscall.c
+index 47777350..4f456807 100644
+--- a/syscall.c
++++ b/syscall.c
+@@ -1761,13 +1761,68 @@ static int secure_relative_open_resolve_beneath(const char *basedir, const char
+ }
+ #endif
+ 
++/* The logical current directory (maintained by change_dir() in util1.c).
++ * Defined here -- rather than in util1.c -- so the test helpers that link
++ * syscall.o but not util1.o (tls, trimslash) get the definition without a
++ * weak-symbol fallback, which is not portable to PE/COFF targets (Cygwin). */
++char curr_dir[MAXPATHLEN];
++unsigned int curr_dir_len;
++
+ int secure_relative_open(const char *basedir, const char *relpath, int flags, mode_t mode)
+ {
++	extern int am_daemon, am_chrooted;
++	extern char *module_dir;
++	extern unsigned int module_dirlen;
++	char modrel_buf[MAXPATHLEN];
++	int reanchored = 0;
++
+ 	if (!relpath || relpath[0] == '/') {
+ 		// must be a relative path
+ 		errno = EINVAL;
+ 		return -1;
+ 	}
++
++	/* Sanitizing daemon only (am_daemon && !am_chrooted).  Here we have chdir'd
++	 * into a sub-dir of the module (the transfer destination), so a relative
++	 * alt-dest like "../01" may legitimately climb to a sibling that is still
++	 * inside the module (#915).  Confining beneath the cwd would reject that
++	 * climb.  Re-anchor at the module root -- the real trust boundary -- by
++	 * prefixing the cwd's module-relative path (from rsync's logical curr_dir[],
++	 * a guaranteed lexical prefix of module_dir, unlike getcwd()) and resolving
++	 * beneath module_dir; RESOLVE_BENEATH then allows in-module climbs and still
++	 * rejects escapes.  Only for paths that contain "..".  module_dirlen is 0 for
++	 * a `path = /` module (clientserver.c), so we gate on module_dir, not its
++	 * length, to cover that case too -- the prefix check below treats
++	 * module_dirlen 0 as "module root is /". */
++	if (am_daemon && !am_chrooted
++	 && module_dir && module_dir[0] == '/'
++	 && (basedir == NULL || basedir[0] != '/')
++	 && (path_has_dotdot_component(relpath)
++	  || (basedir && path_has_dotdot_component(basedir)))) {
++		const char *p;
++		int n;
++		if (curr_dir_len >= module_dirlen
++		 && strncmp(curr_dir, module_dir, module_dirlen) == 0
++		 && (curr_dir[module_dirlen] == '\0' || curr_dir[module_dirlen] == '/')) {
++			for (p = curr_dir + module_dirlen; *p == '/'; p++) {}
++			if (basedir)
++				n = snprintf(modrel_buf, sizeof modrel_buf, "%s%s%s/%s",
++					     p, *p ? "/" : "", basedir, relpath);
++			else
++				n = snprintf(modrel_buf, sizeof modrel_buf, "%s%s%s",
++					     p, *p ? "/" : "", relpath);
++			if (n < 0 || n >= (int)sizeof modrel_buf) {
++				errno = ENAMETOOLONG;
++				return -1;
++			}
++			basedir = module_dir;	/* absolute, operator-trusted anchor */
++			relpath = modrel_buf;
++			reanchored = 1;
++		}
++		/* else: cwd not under module root as expected -- fall through to the
++		 * front-door rejection below (fail safe). */
++	}
++
+ 	/* Reject any path with a literal ".." component (bare "..",
+ 	 * "../foo", "foo/..", "foo/../bar", "subdir/.."). The previous
+ 	 * substring-based check caught only "../" prefix and "/../"
+@@ -1776,14 +1831,19 @@ int secure_relative_open(const char *basedir, const char *relpath, int flags, mo
+ 	 * and pre-5.6 Linux. RESOLVE_BENEATH on Linux/FreeBSD/macOS
+ 	 * catches some of these in-kernel with EXDEV, but the front
+ 	 * door must reject them consistently with EINVAL across all
+-	 * platforms so callers can rely on the validation. */
+-	if (path_has_dotdot_component(relpath)) {
+-		errno = EINVAL;
+-		return -1;
+-	}
+-	if (basedir && basedir[0] != '/' && path_has_dotdot_component(basedir)) {
+-		errno = EINVAL;
+-		return -1;
++	 * platforms so callers can rely on the validation.  Skipped for a
++	 * re-anchored path: its ".." is deliberate, stays within the module,
++	 * and is adjudicated by RESOLVE_BENEATH below (the portable fallback
++	 * re-rejects it -- see there). */
++	if (!reanchored) {
++		if (path_has_dotdot_component(relpath)) {
++			errno = EINVAL;
++			return -1;
++		}
++		if (basedir && basedir[0] != '/' && path_has_dotdot_component(basedir)) {
++			errno = EINVAL;
++			return -1;
++		}
+ 	}
+ 
+ #ifdef __linux__
+@@ -1800,6 +1860,21 @@ int secure_relative_open(const char *basedir, const char *relpath, int flags, mo
+ 	return secure_relative_open_resolve_beneath(basedir, relpath, flags, mode);
+ #endif
+ 
++	/* Portable fallback only (no kernel RESOLVE_BENEATH): the per-component
++	 * O_NOFOLLOW walk below can't adjudicate ".." safely, so reject it here --
++	 * even for a re-anchored path.  This re-breaks --link-dest=../01 on
++	 * openat2/O_RESOLVE_BENEATH-less platforms (NetBSD/OpenBSD/Solaris/Cygwin/
++	 * pre-5.6 Linux), trading function for safety; on the kernel paths above
++	 * RESOLVE_BENEATH already allowed the in-module climb. */
++	if (path_has_dotdot_component(relpath)) {
++		errno = EINVAL;
++		return -1;
++	}
++	if (basedir && basedir[0] != '/' && path_has_dotdot_component(basedir)) {
++		errno = EINVAL;
++		return -1;
++	}
++
+ #if !defined(O_NOFOLLOW) || !defined(O_DIRECTORY) || !defined(AT_FDCWD)
+ 	// really old system, all we can do is live with the risks
+ 	if (!basedir) {
+diff --git a/t_stub.c b/t_stub.c
+index 904dac99..32659b4a 100644
+--- a/t_stub.c
++++ b/t_stub.c
+@@ -39,6 +39,8 @@ int open_noatime = 0;
+ size_t max_alloc = 0; /* max_alloc is needed when combined with util2.o */
+ char *partial_dir;
+ char *module_dir;
++/* curr_dir[]/curr_dir_len (read by secure_relative_open) are defined in
++ * syscall.c, which every helper links -- no stub needed here. */
+ filter_rule_list daemon_filter_list;
+ 
+  void rprintf(UNUSED(enum logcode code), const char *format, ...)
+diff --git a/util1.c b/util1.c
+index 36c1b68c..12361057 100644
+--- a/util1.c
++++ b/util1.c
+@@ -41,8 +41,8 @@ extern filter_rule_list daemon_filter_list;
+ 
+ int sanitize_paths = 0;
+ 
+-char curr_dir[MAXPATHLEN];
+-unsigned int curr_dir_len;
++extern char curr_dir[MAXPATHLEN];   /* defined in syscall.c */
++extern unsigned int curr_dir_len;
+ int curr_dir_depth; /* This is only set for a sanitizing daemon. */
+ 
+ /* Set a fd into nonblocking mode. */
+-- 
+2.53.0
+

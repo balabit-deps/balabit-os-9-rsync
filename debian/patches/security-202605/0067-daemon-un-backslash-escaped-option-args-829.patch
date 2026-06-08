@@ -1,0 +1,98 @@
+From 4ad3dbcfa3298416ff4719a7b3dd0a15eede7060 Mon Sep 17 00:00:00 2001
+From: Andrew Tridgell <andrew@tridgell.net>
+Date: Thu, 4 Jun 2026 16:19:31 +1000
+Subject: [PATCH 67/81] daemon: un-backslash escaped option args (#829)
+
+Without --secluded-args, the client's safe_arg() backslash-escapes shell
+and wildcard chars in option values before sending them to the server, so
+--chown's --usermap=*:user is transmitted as --usermap=\*:user.  Over ssh a
+remote shell removes the backslashes before rsync parses the args, but a
+daemon has no shell and read_args() stored option args verbatim -- so the
+receiver saw the literal "\*", the usermap/groupmap wildcard never matched,
+and the module's configured uid/gid won instead.  A regression from the
+secluded-args hardening; rsync 3.2.3 (protocol 31) worked.
+
+Un-backslash option args in read_args() on the daemon's first
+(non-protected) read, mirroring what the ssh-side shell does.  File args
+after the dot are already handled by glob_expand(); the protected (NUL,
+already-unescaped) re-read and the server's stdin read pass unescape=0 so
+their raw args are left untouched.
+
+Thanks to @elcamlost for the report (#829).
+
+Fixes: #829
+(cherry picked from commit 8dc5fd140855be8bdc3d1291e67ea33fe6afca98)
+---
+ clientserver.c |  4 ++--
+ io.c           | 20 +++++++++++++++++++-
+ main.c         |  2 +-
+ 3 files changed, 22 insertions(+), 4 deletions(-)
+
+--- a/clientserver.c
++++ b/clientserver.c
+@@ -1070,7 +1070,7 @@ static int rsync_module(int f_in, int f_
+ 
+ 	io_printf(f_out, "@RSYNCD: OK\n");
+ 
+-	read_args(f_in, name, line, sizeof line, rl_nulls, &argv, &argc, &request);
++	read_args(f_in, name, line, sizeof line, rl_nulls, 1, &argv, &argc, &request);
+ 	orig_argv = argv;
+ 
+ 	save_munge_symlinks = munge_symlinks;
+@@ -1080,7 +1080,7 @@ static int rsync_module(int f_in, int f_
+ 	if (protect_args && ret) {
+ 		orig_early_argv = orig_argv;
+ 		protect_args = 2;
+-		read_args(f_in, name, line, sizeof line, 1, &argv, &argc, &request);
++		read_args(f_in, name, line, sizeof line, 1, 0, &argv, &argc, &request);
+ 		orig_argv = argv;
+ 		ret = parse_arguments(&argc, (const char ***) &argv);
+ 	} else
+--- a/io.c
++++ b/io.c
+@@ -1292,8 +1292,21 @@ int read_line(int fd, char *buf, size_t
+ 	return s - buf;
+ }
+ 
++/* Reverse safe_arg()'s backslash escaping of a daemon option arg, the way a
++ * remote shell un-escapes args for the ssh transport.  In place; \X -> X. */
++static void unbackslash_arg(char *s)
++{
++	char *f = s, *t = s;
++	while (*f) {
++		if (*f == '\\' && f[1])
++			f++;
++		*t++ = *f++;
++	}
++	*t = '\0';
++}
++
+ void read_args(int f_in, char *mod_name, char *buf, size_t bufsiz, int rl_nulls,
+-	       char ***argv_p, int *argc_p, char **request_p)
++	       int unescape, char ***argv_p, int *argc_p, char **request_p)
+ {
+ 	int maxargs = MAX_ARGS;
+ 	int dot_pos = 0, argc = 0, request_len = 0;
+@@ -1335,6 +1348,11 @@ void read_args(int f_in, char *mod_name,
+ 				glob_expand(buf, &argv, &argc, &maxargs);
+ 		} else {
+ 			p = strdup(buf);
++			/* An option arg the client escaped with safe_arg() (no
++			 * remote shell un-escapes it for a daemon).  File args
++			 * after the dot are handled by glob_expand() below. */
++			if (unescape)
++				unbackslash_arg(p);
+ 			argv[argc++] = p;
+ 			if (*p == '.' && p[1] == '\0')
+ 				dot_pos = argc;
+--- a/main.c
++++ b/main.c
+@@ -1851,7 +1851,7 @@ int main(int argc,char *argv[])
+ 	if (am_server && protect_args) {
+ 		char buf[MAXPATHLEN];
+ 		protect_args = 2;
+-		read_args(STDIN_FILENO, NULL, buf, sizeof buf, 1, &argv, &argc, NULL);
++		read_args(STDIN_FILENO, NULL, buf, sizeof buf, 1, 0, &argv, &argc, NULL);
+ 		if (!parse_arguments(&argc, (const char ***) &argv)) {
+ 			option_error();
+ 			exit_cleanup(RERR_SYNTAX);

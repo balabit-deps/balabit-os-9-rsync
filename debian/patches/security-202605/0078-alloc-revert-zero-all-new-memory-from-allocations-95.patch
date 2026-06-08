@@ -1,0 +1,59 @@
+From de40b46af29f81639f7217b287fe409ffc64a301 Mon Sep 17 00:00:00 2001
+From: Andrew Tridgell <andrew@tridgell.net>
+Date: Sun, 7 Jun 2026 19:43:15 +1000
+Subject: [PATCH 78/81] alloc: revert "zero all new memory from allocations"
+ (#959)
+
+Commit d046525d made my_alloc() calloc every fresh allocation and made
+expand_item_list() memset the freshly grown tail, to hand out predictably
+zeroed memory.  But that forces the kernel to back pages callers never
+touch: each per-directory file_list pre-allocates a FLIST_START-entry
+(32768) pointer array -- 256KB -- and calloc now zeroes the whole array
+even for an empty directory.  With incremental recursion over many
+directories the resident set explodes; 80000 empty dirs went from ~336MB
+to ~10.8GB.
+
+Restore the pre-d046525d malloc/calloc split: fresh allocations use
+malloc (so untouched tails stay lazy) and only explicit do_calloc
+requests (new_array0) are zeroed.  Callers that need zeroed memory
+already ask for it, and the full test suite passes.
+
+Thanks to @guilherme-puida for the report (#959).
+
+Fixes: #959
+---
+ util1.c | 2 --
+ util2.c | 4 +++-
+ 2 files changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/util1.c b/util1.c
+index 12361057..7a1f24b5 100644
+--- a/util1.c
++++ b/util1.c
+@@ -1788,8 +1788,6 @@ void *expand_item_list(item_list *lp, size_t item_size, const char *desc, int in
+ 				new_ptr == lp->items ? " not" : "");
+ 		}
+ 
+-		memset((char *)new_ptr + lp->malloced * item_size, 0,
+-		       (expand_size - lp->malloced) * item_size);
+ 		lp->items = new_ptr;
+ 		lp->malloced = expand_size;
+ 	}
+diff --git a/util2.c b/util2.c
+index c241cfb7..a8609a5d 100644
+--- a/util2.c
++++ b/util2.c
+@@ -79,7 +79,9 @@ void *my_alloc(void *ptr, size_t num, size_t size, const char *file, int line)
+ 			who_am_i(), do_big_num(max_alloc, 0, NULL), src_file(file), line);
+ 		exit_cleanup(RERR_MALLOC);
+ 	}
+-	if (!ptr || ptr == do_calloc)
++	if (!ptr)
++		ptr = malloc(num * size);
++	else if (ptr == do_calloc)
+ 		ptr = calloc(num, size);
+ 	else
+ 		ptr = realloc(ptr, num * size);
+-- 
+2.53.0
+

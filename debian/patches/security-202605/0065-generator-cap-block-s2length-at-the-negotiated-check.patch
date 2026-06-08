@@ -1,0 +1,69 @@
+From 1afde63b55920b77c841c2b58c36bbdd75e71aa1 Mon Sep 17 00:00:00 2001
+From: Andrew Tridgell <andrew@tridgell.net>
+Date: Thu, 4 Jun 2026 14:04:47 +1000
+Subject: [PATCH 65/81] generator: cap block s2length at the negotiated
+ checksum length
+
+sum_sizes_sqroot() capped the strong-sum length at SUM_LENGTH (16), the
+legacy MD4/MD5 digest size.  Since 0902b52f the sum2 array elements are
+xfer_sum_len bytes and the sender rejects a sums header whose s2length
+exceeds xfer_sum_len.  When the negotiated transfer checksum is shorter
+than 16 bytes -- xxh64 (8), used when the build's libxxhash lacks
+xxh128/xxh3 (e.g. Ubuntu 20.04) -- the generator still emitted s2length
+up to 16, so --append-verify and other full-checksum (redo) transfers
+died with "Invalid checksum length 16 [sender]" (protocol incompatibility).
+
+Cap s2length at MIN(SUM_LENGTH, xfer_sum_len): unchanged for any checksum
+>= 16 bytes (md5/xxh128/sha1), corrected for short ones.  Also closes a
+latent over-read of the xfer_sum_len-sized digest buffer.
+
+(cherry picked from commit cb82d6937a59e09d7804129b7193cab588b1fa53)
+---
+ generator.c | 10 ++++++++--
+ 1 file changed, 8 insertions(+), 2 deletions(-)
+
+diff --git a/generator.c b/generator.c
+index e5c9f741..e88bf089 100644
+--- a/generator.c
++++ b/generator.c
+@@ -66,6 +66,7 @@ extern int inplace;
+ extern int append_mode;
+ extern int make_backups;
+ extern int csum_length;
++extern int xfer_sum_len;
+ extern int ignore_times;
+ extern int size_only;
+ extern OFF_T max_size;
+@@ -697,6 +698,11 @@ static void sum_sizes_sqroot(struct sum_struct *sum, int64 len)
+ {
+ 	int32 blength;
+ 	int s2length;
++	/* The strong sum can be no longer than the negotiated checksum digest:
++	 * a short checksum (e.g. xxh64 = 8 bytes, when xxh128/xxh3 are absent)
++	 * makes xfer_sum_len < SUM_LENGTH, and the sender rejects an s2length
++	 * larger than xfer_sum_len (io.c). */
++	int max_s2length = MIN(SUM_LENGTH, xfer_sum_len);
+ 	int64 l;
+ 
+ 	if (len < 0) {
+@@ -731,7 +737,7 @@ static void sum_sizes_sqroot(struct sum_struct *sum, int64 len)
+ 	if (protocol_version < 27) {
+ 		s2length = csum_length;
+ 	} else if (csum_length == SUM_LENGTH) {
+-		s2length = SUM_LENGTH;
++		s2length = max_s2length;
+ 	} else {
+ 		int32 c;
+ 		int b = BLOCKSUM_BIAS;
+@@ -740,7 +746,7 @@ static void sum_sizes_sqroot(struct sum_struct *sum, int64 len)
+ 		/* add a bit, subtract rollsum, round up. */
+ 		s2length = (b + 1 - 32 + 7) / 8; /* --optimize in compiler-- */
+ 		s2length = MAX(s2length, csum_length);
+-		s2length = MIN(s2length, SUM_LENGTH);
++		s2length = MIN(s2length, max_s2length);
+ 	}
+ 
+ 	sum->flength	= len;
+-- 
+2.53.0
+

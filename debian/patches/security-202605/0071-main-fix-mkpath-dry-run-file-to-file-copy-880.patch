@@ -1,0 +1,47 @@
+From 716f831ebc3bc5c2544c1460321ddc4ed5e41aed Mon Sep 17 00:00:00 2001
+From: Andrew Tridgell <andrew@tridgell.net>
+Date: Fri, 5 Jun 2026 11:29:18 +1000
+Subject: [PATCH 71/81] main: fix --mkpath + --dry-run file-to-file copy (#880)
+
+A single-file --mkpath copy whose destination parent does not exist
+failed under --dry-run: make_path() only *reports* the directories it
+would create in a dry run, so change_dir#3 then tried to chdir into a
+parent that isn't there and aborted with "change_dir#3 ... failed".
+
+When the parent is genuinely missing in a dry run, skip the chdir and
+mark the destination as not-yet-present (dry_run++), exactly as the
+multi-file/dir-creation path already does, so the generator doesn't
+probe the missing tree.  Gating it on the missing-parent case keeps an
+ordinary file-to-file dry run chdir'ing into and itemizing against an
+existing destination.
+
+Fixes: #880
+
+Thanks to @pkzc for the report (#880).
+
+Co-authored-by: Stiliyan Tonev (Bark) <stiliyan21@gmail.com>
+(cherry picked from commit e096bbd64e43c51051454f00bd30b0dfe0289eff)
+---
+ main.c | 11 ++++++++++-
+ 1 file changed, 10 insertions(+), 1 deletion(-)
+
+--- a/main.c
++++ b/main.c
+@@ -832,7 +832,16 @@ static char *get_local_name(struct file_
+ 		dest_path = "/";
+ 
+ 	*cp = '\0';
+-	if (!change_dir(dest_path, CD_NORMAL)) {
++	if (dry_run && mkpath_dest_arg && do_stat(dest_path, &st) < 0) {
++		/* --mkpath would have created this parent dir, but a dry run did
++		 * not, so don't chdir into it; flag the destination as not yet
++		 * present (as the dir-creation path above does) so the generator
++		 * doesn't try to compare against the missing tree (#880).  Only
++		 * the missing-parent case is touched, so an ordinary file-to-file
++		 * dry run still itemizes against an existing destination. */
++		dry_run++;
++		change_dir(dest_path, CD_SKIP_CHDIR);
++	} else if (!change_dir(dest_path, CD_NORMAL)) {
+ 		rsyserr(FERROR, errno, "change_dir#3 %s failed",
+ 			full_fname(dest_path));
+ 		exit_cleanup(RERR_FILESELECT);

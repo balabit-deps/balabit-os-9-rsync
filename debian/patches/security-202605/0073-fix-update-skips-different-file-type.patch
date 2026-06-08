@@ -1,0 +1,27 @@
+From 733ab71c8fb11f9fbb92da75a075433c0560345d Mon Sep 17 00:00:00 2001
+From: Zen Dodd <mail@steadytao.com>
+Date: Thu, 4 Jun 2026 01:16:50 +1000
+Subject: [PATCH 73/81] fix: update skips different file type
+
+(cherry picked from commit def944a501607d0d8d9620cd3090234d674d0dd1)
+---
+ generator.c | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/generator.c b/generator.c
+index 84eab1a6..f1babab6 100644
+--- a/generator.c
++++ b/generator.c
+@@ -1718,7 +1718,8 @@ static void recv_generator(char *fname, struct file_struct *file, int ndx,
+ 		goto cleanup;
+ 	}
+ 
+-	if (update_only > 0 && statret == 0 && file->modtime - sx.st.st_mtime < modify_window) {
++	if (update_only > 0 && statret == 0 && stype == ftype
++	 && file->modtime - sx.st.st_mtime < modify_window) {
+ 		if (INFO_GTE(SKIP, 1))
+ 			rprintf(FINFO, "%s is newer\n", fname);
+ #ifdef SUPPORT_HARD_LINKS
+-- 
+2.53.0
+

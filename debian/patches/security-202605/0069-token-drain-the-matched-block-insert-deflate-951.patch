@@ -1,0 +1,77 @@
+From 59c6a27275e1292aefa252205f17f725a2eeb336 Mon Sep 17 00:00:00 2001
+From: Andrew Tridgell <andrew@tridgell.net>
+Date: Thu, 4 Jun 2026 15:49:14 +1000
+Subject: [PATCH 69/81] token: drain the matched-block insert deflate (#951)
+
+send_deflated_token() adds a matched block to the compressor history with
+deflate(Z_INSERT_ONLY).  Our bundled zlib implements Z_INSERT_ONLY (it
+produces no output and consumes the input in one call), but a build
+against a system zlib lacks it and falls back to Z_SYNC_FLUSH (see the top
+of the file), which emits a flush block into obuf.  For a large
+incompressible matched token that block exceeds AVAIL_OUT_SIZE(CHUNK_SIZE),
+so deflate returned with avail_in != 0 and the transfer aborted:
+
+    "deflate on token returned 0 (N bytes left)"  at token.c
+
+The insert output is never sent -- the receiver rebuilds the matching
+history itself in see_deflate_token() -- so loop, resetting the output
+buffer, and discard it.  Drain with the same condition as the data loop
+above: until the input is consumed AND avail_out != 0.  Stopping at
+avail_in == 0 alone can leave pending output in the deflate stream (a
+full output buffer with bytes still buffered), which would then be emitted
+by the next real deflate send and corrupt the stream.  A bundled-zlib
+build still finishes in one iteration.
+
+Thanks to @brabalan for the report (#951).
+
+Fixes: #951
+(cherry picked from commit 8504275acd41f0c54dac18066290083030003627)
+---
+ token.c | 31 +++++++++++++++++++++++--------
+ 1 file changed, 23 insertions(+), 8 deletions(-)
+
+diff --git a/token.c b/token.c
+index 02dabd8d..9b399c01 100644
+--- a/token.c
++++ b/token.c
+@@ -480,14 +480,29 @@ send_deflated_token(int f, int32 token, struct map_struct *buf, OFF_T offset, in
+ 			tx_strm.avail_in = n1;
+ 			if (protocol_version >= 31) /* Newer protocols avoid a data-duplicating bug */
+ 				offset += n1;
+-			tx_strm.next_out = (Bytef *) obuf;
+-			tx_strm.avail_out = AVAIL_OUT_SIZE(CHUNK_SIZE);
+-			r = deflate(&tx_strm, Z_INSERT_ONLY);
+-			if (r != Z_OK || tx_strm.avail_in != 0) {
+-				rprintf(FERROR, "deflate on token returned %d (%d bytes left)\n",
+-					r, tx_strm.avail_in);
+-				exit_cleanup(RERR_STREAMIO);
+-			}
++			/* With our bundled zlib's Z_INSERT_ONLY this produces no
++			 * output and consumes the input in one call.  A build
++			 * against a system zlib lacks Z_INSERT_ONLY and falls back
++			 * to Z_SYNC_FLUSH (see top of file), which emits a flush
++			 * block we discard -- and for an incompressible token that
++			 * block can exceed obuf.  Loop, resetting the output buffer,
++			 * until all the input is consumed so a large token can't
++			 * overflow obuf and abort the transfer (#951).  Drain until
++			 * avail_out != 0 too: a full output buffer can leave pending
++			 * bytes that would otherwise leak into the next real deflate
++			 * send and corrupt the stream (same condition as the data loop
++			 * above).  The discarded output is not sent: the receiver
++			 * rebuilds the matching history itself in see_deflate_token(). */
++			do {
++				tx_strm.next_out = (Bytef *) obuf;
++				tx_strm.avail_out = AVAIL_OUT_SIZE(CHUNK_SIZE);
++				r = deflate(&tx_strm, Z_INSERT_ONLY);
++				if (r != Z_OK) {
++					rprintf(FERROR, "deflate on token returned %d (%d bytes left)\n",
++						r, tx_strm.avail_in);
++					exit_cleanup(RERR_STREAMIO);
++				}
++			} while (tx_strm.avail_in != 0 || tx_strm.avail_out == 0);
+ 		} while (toklen > 0);
+ 	}
+ }
+-- 
+2.53.0
+
